@@ -82,4 +82,4 @@ with open("playlist_transcripts.json", "w", encoding="utf-8") as f:
 
 print(f"\n✅ All done! Saved {len(all_videos_data)} entries to playlist_transcripts.json")
 
-#AIzaSyDj5Ppin5xFuftHI4vZFFwFi4E_A1SiHLI
+
