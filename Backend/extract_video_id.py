@@ -2,7 +2,7 @@ import json
 from googleapiclient.discovery import build
 from extract_transcript import YouTubeTranscript  # <-- change to your module filename
 
-api_key = "AIzaSyDj5Ppin5xFuftHI4vZFFwFi4E_A1SiHLI"  # 🔑 Put your API key here
+api_key = "Your api key"  # 🔑 Put your API key here
 playlist_id = "PLVOgwA_DiGzoo6KwL0eeDyUBBbTRGMgFy"  # 🔑 Put your playlist ID here - 4th session of 18th loksabha
 
 # Initialize YouTube API client
