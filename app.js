@@ -301,11 +301,11 @@ var chatApp = {
                 console.log('📊 Rendering independent graph visualization with ID:', uniqueGraphId);
                 self.addMessage('assistant', htmlContent);
             } else if (htmlContent.includes('Error') || htmlContent.includes('empty')) {
-                self.addMessage('assistant', 'The knowledge graph is empty. Ask me some questions about Barbados Parliament first to build up the graph!');
+                self.addMessage('assistant', 'The knowledge graph is empty. Ask me some questions about Indian Parliament first to build up the graph!');
             } else {
                 self.addMessage('assistant', 'Sorry, I could not generate the graph visualization.');
             }
-        })
+
         .catch(function(error) {
             console.error('❌ Graph command failed:', error);
             self.hideThinkingDots();
