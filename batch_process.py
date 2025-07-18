@@ -3,6 +3,8 @@ import os
 from pathlib import Path
 from process import ParliamentaryTranscriptProcessor
 
+TRANSCRIPTS_DIR = "transcripts"  # or the folder where your transcripts are stored
+
 def main():
     metadata_file = 'Metadata.json'  # or the path to your JSON file
     
@@ -19,28 +21,26 @@ def main():
         return
     
     processor = ParliamentaryTranscriptProcessor()
-    
-    for video in metadata:
-        transcript_info = video.get("transcript", {})
         
-        has_transcript = transcript_info.get("hasTranscript", False)
-        transcript_filename = transcript_info.get("formattedContent")
-        
-        if not has_transcript or not transcript_filename:
-            print(f"Skipping video '{video.get('Video_title')}' - No transcript.")
-            continue
-        
-        if not Path(transcript_filename).exists():
-            print(f"Transcript file '{transcript_filename}' does not exist. Skipping.")
-            continue
-        
-        print(f"\n=== Processing Video: {video.get('Video_title')} ===")
-        try:
-            processor.process_transcript(transcript_filename)
-        except Exception as e:
-            print(f"Error processing {transcript_filename}: {e}")
-    
-    print("\n✅ All transcripts processed!")
 
+    for video in metadata:  # ✅ Corrected loop
+        video_id = video.get("video_id")
+        title = video.get("title", "[Untitled]")
+        if not video_id:
+            print(f"⚠️ Skipping metadata entry with no video_id: {video}")
+            continue
+
+        transcript_path = Path(TRANSCRIPTS_DIR) / f"{video_id}.json"
+        if not transcript_path.exists():
+            print(f"❌ Transcript file missing for video ID: {video_id}")
+            continue
+
+        print(f"\n📺 Processing: {title} (ID: {video_id})")
+        try:
+            processor.process_transcript(str(transcript_path))
+        except Exception as e:
+            print(f"❌ Error processing '{video_id}': {e}")
+
+    print("\n✅ All transcripts processed!")
 if __name__ == "__main__":
     main()
