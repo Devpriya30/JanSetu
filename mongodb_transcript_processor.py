@@ -102,12 +102,12 @@ The input will be XML-formatted transcript data with time-aligned text segments 
 1. **Comprehensive Transcription Correction:**
    - **Error Identification:** Thoroughly review the text content of all segments for transcription errors. These typically include spelling mistakes, grammatical inaccuracies, missing punctuation, and mishearings (e.g., homophones, words incorrectly segmented or combined by the AI).
    - **Clarity & Accuracy:** Correct all identified errors to ensure the text is grammatically sound, correctly spelled, and accurately reflects the likely spoken content. The goal is to produce highly readable and semantically coherent sentences.
-   - **Barbadian English & Context:** Be mindful of Barbadian English nuances, common parliamentary terminology, and the formal tone expected in parliamentary proceedings. Ensure corrections align with this context (e.g., "Honourable" vs. "Honorable" - prefer "Honourable" as per UK/Commonwealth spelling).
+   - **Indian English & Context:** Be mindful of Indian English nuances, common parliamentary terminology, and the formal tone expected in parliamentary proceedings. Ensure corrections align with this context (e.g., "Honourable" vs. "Honorable" - prefer "Honourable" as per Indian spelling).
 
 2. **Strict Name & Entity Handling:**
    - **Extreme Caution with Proper Nouns:** Exercise the utmost caution with proper nouns, especially names of individuals (e.g., Members of Parliament, ministers, citizens mentioned), constituencies, specific legislation, or organizations.
    - **Ambiguity Resolution:** If there is *any* doubt regarding the correct spelling of a proper noun, or if the transcribed name sounds ambiguous or could be mistaken, **replace it with `[unknown]`**. This is crucial to prevent the propagation of factual errors into the Knowledge Graph.
-   - **Parliamentary Titles:** Accurately identify and correctly spell common parliamentary titles and forms of address, such as "Mr. Speaker," "Madam President," "Honourable Member for [Constituency Name]," "Minister [Name]," "Prime Minister," "Leader of the Opposition," etc., ensuring they are capitalized correctly. Do *not* use `[unknown]` for these if their context is clear.
+   - **Parliamentary Titles:** Accurately identify and correctly spell common parliamentary titles and forms of address, such as "Mr. Speaker," "Mr. President," "Honourable Member for [Constituency Name]," "Minister [Name]," "Prime Minister," "Leader of the Opposition," etc., ensuring they are capitalized correctly. Do *not* use `[unknown]` for these if their context is clear.
 
 3. **Accurate Sentence Segmentation (NLP-driven):**
    - **Complete Sentences:** Using advanced Natural Language Processing (NLP) techniques, accurately identify and segment complete sentences. This will often involve merging text segments from multiple input XML elements to form a single, coherent sentence, or occasionally splitting a single text segment if it contains more than one complete sentence.
@@ -159,23 +159,20 @@ Process the following XML transcript data and return ONLY the formatted output w
             List of video documents with transcripts
         """
         query = {
-        "transcript.formattedContent": {"$exists": True, "$ne": ""},
-        "transcript.hasTranscript": True
-        }
-
-
-
+        "transcript.0": {"$exists": True},  # transcript is a non-empty array
+        "hasTranscript": True
+    }
         # Only fetch necessary fields
+       
         projection = {
         "VideoURL": 1,
-        "Video_title": 1,
+        "title": 1,  # Use 'title' instead of 'Video_title' or 'metadata.title'
         "video_id": 1,
-        "transcript.transcript_text": 1,
-        "transcript.formattedContent": 1,
+        "transcript": 1,  # entire transcript array
         "_id": 1
-        }
+    }
 
-        
+
         videos = list(self.raw_videos.find(query, projection))
         print(f"Found {len(videos)} videos with transcripts in raw_videos collection")
         
@@ -194,72 +191,72 @@ Process the following XML transcript data and return ONLY the formatted output w
         existing = self.videos.find_one({"VideoURL": video_url, "transcript": {"$exists": True}})
         return existing is not None
 
-    def process_single_transcript(self, xml_content: str, video_title: str) -> str:
-        """
-        Process a single transcript using the Gemini model.
-        
-        Args:
-            xml_content: XML-formatted transcript content
-            video_title: Title of the video for context
-            
-        Returns:
-            Processed transcript text
-        """
-        # Create messages for the conversation
-        messages = [
-            SystemMessage(content=self.system_prompt),
-            HumanMessage(content=f"Video Title: {video_title}\n\nXML Transcript Data:\n\n{xml_content}")
-        ]
-        
-        try:
-            # Get response from the model
-            response = self.llm.invoke(messages)
-            
-            result = response.content.strip() if response.content else ""
-            
-            if not result:
-                raise Exception("Model returned empty content")
-            
-            return result
-            
-        except Exception as e:
-            raise Exception(f"Error processing with Gemini model: {str(e)}")
 
-    def save_processed_transcript(self, video_url: str, video_title: str, video_id: str, processed_transcript: str) -> bool:
-        """
-        Save the processed transcript to the videos collection.
+    def chunk_xml_content(self, xml_content: str, max_chars: int = 10000) -> List[str]:
+        """Split XML content into chunks no larger than max_chars."""
+        chunks = []
+        current_chunk = ""
+        for line in re.findall(r'<text[^>]*>.*?</text>', xml_content, re.DOTALL):
+            if len(current_chunk) + len(line) > max_chars:
+                chunks.append(current_chunk)
+                current_chunk = line
+            else:
+                current_chunk += line
+        if current_chunk:
+            chunks.append(current_chunk)
+        return chunks
+
+
+
+
+
+    def process_single_transcript(self, xml_content: str, video_title: str) -> str:
+        chunks = self.chunk_xml_content(xml_content)
+        full_result = ""
         
-        Args:
-            video_url: URL of the video
-            video_title: Title of the video
-            video_id: Video ID
-            processed_transcript: Processed transcript text
-            
-        Returns:
-            True if successful, False otherwise
+        for i, chunk in enumerate(chunks):
+            print(f"    🔹 Processing chunk {i+1}/{len(chunks)} ({len(chunk)} characters)...")
+            messages = [
+                SystemMessage(content=self.system_prompt),
+                HumanMessage(content=f"Video Title: {video_title}\n\nXML Transcript Data:\n\n{chunk}")
+            ]
+            try:
+                response = self.llm.invoke(messages)
+                result = response.content.strip() if response.content else ""
+                if not result:
+                    raise Exception("Model returned empty content for chunk")
+                full_result += result + "\n"
+            except Exception as e:
+                print(f"    ❌ Error processing chunk {i+1}: {e}")
+                continue
+        
+        return full_result.strip()
+
+    def save_processed_transcript(self, video_url: str, video_title: str, video_id: str, processed_transcript: List[Dict[str, Any]]) -> bool:
+        """
+        Save the structured processed transcript to the videos collection.
         """
         try:
             document = {
                 "VideoURL": video_url,
                 "Video_title": video_title,
                 "video_id": video_id,
-                "transcript": processed_transcript,
+                "processed_transcript": processed_transcript,
                 "processed_at": datetime.now(timezone.utc),
-                "processor_version": "mongodb_transcript_processor_v1.0"
+                "processor_version": "mongodb_transcript_processor_v1.1"
             }
-            
-            # Use upsert to update if exists or insert if new
+
             result = self.videos.update_one(
                 {"VideoURL": video_url},
                 {"$set": document},
                 upsert=True
             )
-            
             return True
-            
+
         except Exception as e:
             print(f"Error saving processed transcript: {e}")
             return False
+
 
     def process_all_transcripts(self, skip_existing: bool = True, limit: Optional[int] = None):
         """
@@ -270,18 +267,22 @@ Process the following XML transcript data and return ONLY the formatted output w
             limit: Maximum number of videos to process (None for all)
         """
         print("Starting transcript processing...")
-        
-        # Get videos with transcripts
-        videos_to_process = self.get_videos_with_transcripts()
-        
-        if not videos_to_process:
-            print("No videos with transcripts found in raw_videos collection")
-            return
+        query = {
+            "transcript.0": {"$exists": True},
+            "hasTranscript": True
+        }
+        videos_with_transcripts = list(self.raw_videos.find(query))
+
+
+        print(f"✅ Found {len(videos_with_transcripts)} videos with transcripts in raw_videos collection")
+
         
         # Apply limit if specified
+       # Apply limit if specified
+        videos_to_process = videos_with_transcripts[:limit] if limit else videos_with_transcripts
         if limit:
-            videos_to_process = videos_to_process[:limit]
             print(f"Processing limited to first {limit} videos")
+
         
         stats = {
             "total": len(videos_to_process),
@@ -292,7 +293,14 @@ Process the following XML transcript data and return ONLY the formatted output w
         
         for i, video in enumerate(videos_to_process, 1):
             video_url = video.get("VideoURL", "")
-            video_title = video.get("Video_title", "Unknown Title")
+            video_title = (
+                video.get("title") or
+                video.get("Video_title") or
+                video.get("metadata", {}).get("title") or
+                "Unknown Title"
+            )
+
+
             video_id = video.get("video_id", "")
             
             print(f"\n[{i}/{stats['total']}] Processing: {video_title[:80]}...")
@@ -306,10 +314,20 @@ Process the following XML transcript data and return ONLY the formatted output w
             
             try:
                 # Get transcript content
-                xml_content = (
-                 video.get("transcript", {}).get("formattedContent") or
-                video.get("transcript", {}).get("transcript_text", "")
-                )
+                segments = video.get("transcript", [])
+                if not isinstance(segments, list):
+                    print("  ⚠️ Transcript is not a list")
+                    stats["errors"] += 1
+                    continue
+
+            # Reconstruct XML from segment list
+                xml_content = ""
+                for seg in segments:
+                    start = seg.get("start", "0.0")
+                    dur = seg.get("dur", "0.0")
+                    text = seg.get("#text", "")
+                    xml_content += f'<text start="{start}" dur="{dur}">{text}</text>\n'
+
 
                 
                 if not xml_content:
@@ -323,18 +341,30 @@ Process the following XML transcript data and return ONLY the formatted output w
                 print(f"  📊 XML content length: {len(xml_content)} characters")
                 
                 # Process transcript
+                # Process transcript
                 print("  🤖 Processing with Gemini...")
-                processed_transcript = self.process_single_transcript(xml_content, video_title)
-                
-                # Save to videos collection
+                raw_output = self.process_single_transcript(xml_content, video_title)
+
+                # Convert Gemini output (e.g., "103 Sentence here") into structured format
+                structured = []
+                for line in raw_output.splitlines():
+                    match = re.match(r"^(\d+)\s+(.+)", line.strip())
+                    if match:
+                        start, text = int(match.group(1)), match.group(2).strip()
+                        structured.append({"start": start, "text": text})
+                    else:
+                        print(f"  ⚠️ Skipped malformed line: {line}")
+
+                 # Save structured output to videos collection
+                 # Save structured output to videos collection
                 print("  💾 Saving processed transcript...")
-                if self.save_processed_transcript(video_url, video_title, video_id, processed_transcript):
-                    print(f"  ✅ Successfully processed and saved ({len(processed_transcript)} chars)")
+                if self.save_processed_transcript(video_url, video_title, video_id, structured):
+                    print(f"  ✅ Successfully processed and saved ({len(structured)} sentences)")
                     stats["processed"] += 1
                 else:
                     print("  ❌ Failed to save processed transcript")
                     stats["errors"] += 1
-                
+                    
             except Exception as e:
                 print(f"  ❌ Error processing video: {e}")
                 stats["errors"] += 1
@@ -350,10 +380,9 @@ Process the following XML transcript data and return ONLY the formatted output w
     def get_processing_stats(self) -> Dict[str, int]:
         """Get statistics about processed transcripts."""
         raw_with_transcripts = self.raw_videos.count_documents({
-        "transcript.formattedContent": {"$exists": True, "$ne": ""},
-        "transcript.hasTranscript": True
+            "transcript.formattedContent": {"$exists": True, "$ne": ""},
+            "hasTranscript": True
         })
-
         
         processed_count = self.videos.count_documents({
             "transcript": {"$exists": True, "$ne": ""}
